@@ -23,7 +23,19 @@ enum Commands {
         key: String,
     },
     List,
-    Export,
+    Export {
+        #[arg(short, long, default_value = "fish")]
+        shell: String,
+    },
+}
+
+fn format_export(key: &str, value: &str, shell: &str) -> String {
+    match shell {
+        "fish" => format!("set -gx {} \"{}\"", key, value),
+        "bash" | "sh" | "zsh" => format!("export {}=\"{}\"", key, value),
+        "csh" | "tcsh" => format!("setenv {} \"{}\"", key, value),
+        _ => format!("export {}=\"{}\"", key, value), // default to bash-style
+    }
 }
 
 fn main() -> Result<()> {
@@ -50,10 +62,10 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Export => {
+        Commands::Export { shell } => {
             let secrets = db.get_all_secrets()?;
             for (key, value) in secrets {
-                println!("set -x {}=\"{}\"", key, value);
+                println!("{}", format_export(&key, &value, &shell));
             }
         }
     }
