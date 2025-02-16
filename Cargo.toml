@@ -1,0 +1,15 @@
+[package]
+name = "sven"
+version = "0.1.0"
+edition = "2021"
+description = "Secure environment variable encryption manager"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+dirs = "5.0"
+gpgme = "0.11"
+rusqlite = { version = "0.30", features = ["bundled"] }
+thiserror = "1.0"
+dialoguer = "0.11"
+base64 = "0.21"
