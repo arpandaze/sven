@@ -29,6 +29,13 @@ enum Commands {
     },
 }
 
+fn print_line(line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    writeln!(handle, "{}", line)
+}
+
 fn format_export(key: &str, value: &str, shell: &str) -> String {
     match shell {
         "fish" => format!("set -gx {} \"{}\"", key, value),
@@ -39,33 +46,60 @@ fn format_export(key: &str, value: &str, shell: &str) -> String {
 }
 
 fn main() -> Result<()> {
+    // Set up a panic hook that exits silently on broken pipe errors
+    std::panic::set_hook(Box::new(|panic_info| {
+        if let Some(message) = panic_info.payload().downcast_ref::<String>() {
+            if !message.contains("Broken pipe") {
+                eprintln!("{}", panic_info);
+            }
+        } else if let Some(message) = panic_info.payload().downcast_ref::<&str>() {
+            if !message.contains("Broken pipe") {
+                eprintln!("{}", panic_info);
+            }
+        } else {
+            eprintln!("{}", panic_info);
+        }
+    }));
+
     let cli = Cli::parse();
     let mut db = Database::new()?;
 
     match cli.command {
         Commands::Add { key, value } => {
             db.add_secret(&key, &value)?;
-            println!("Added secret: {}", key);
+            if print_line(&format!("Added secret: {}", key)).is_err() {
+                std::process::exit(0);
+            }
         }
         Commands::Remove { key } => {
             db.remove_secret(&key)?;
-            println!("Removed secret: {}", key);
+            if print_line(&format!("Removed secret: {}", key)).is_err() {
+                std::process::exit(0);
+            }
         }
         Commands::List => {
             let secrets = db.list_secrets()?;
             if secrets.is_empty() {
-                println!("No secrets found");
+                if print_line("No secrets found").is_err() {
+                    std::process::exit(0);
+                }
             } else {
-                println!("Secrets:");
+                if print_line("Secrets:").is_err() {
+                    std::process::exit(0);
+                }
                 for key in secrets {
-                    println!("  {}", key);
+                    if print_line(&format!("  {}", key)).is_err() {
+                        std::process::exit(0);
+                    }
                 }
             }
         }
         Commands::Export { shell } => {
             let secrets = db.get_all_secrets()?;
             for (key, value) in secrets {
-                println!("{}", format_export(&key, &value, &shell));
+                if print_line(&format_export(&key, &value, &shell)).is_err() {
+                    std::process::exit(0);
+                }
             }
         }
     }
