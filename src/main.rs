@@ -36,12 +36,45 @@ fn print_line(line: &str) -> std::io::Result<()> {
     writeln!(handle, "{}", line)
 }
 
-fn format_export(key: &str, value: &str, shell: &str) -> String {
+fn escape_value_for_shell(value: &str, shell: &str) -> String {
     match shell {
-        "fish" => format!("set -gx {} \"{}\"", key, value),
-        "bash" | "sh" | "zsh" => format!("export {}=\"{}\"", key, value),
-        "csh" | "tcsh" => format!("setenv {} \"{}\"", key, value),
-        _ => format!("export {}=\"{}\"", key, value), // default to bash-style
+        "fish" => {
+            // Fish escapes $ with \$
+            value.replace('$', "\\$")
+        }
+        "bash" | "sh" | "zsh" => {
+            // Bash/sh/zsh escapes $ with \$, ` with \`, " with \", and \ with \\
+            value
+                .replace('\\', "\\\\")
+                .replace('$', "\\$")
+                .replace('`', "\\`")
+                .replace('"', "\\\"")
+        }
+        "csh" | "tcsh" => {
+            // csh/tcsh escapes $ with \$, ! with \!, and " with \"
+            value
+                .replace('$', "\\$")
+                .replace('!', "\\!")
+                .replace('"', "\\\"")
+        }
+        _ => {
+            // Default to bash-style escaping
+            value
+                .replace('\\', "\\\\")
+                .replace('$', "\\$")
+                .replace('`', "\\`")
+                .replace('"', "\\\"")
+        }
+    }
+}
+
+fn format_export(key: &str, value: &str, shell: &str) -> String {
+    let escaped_value = escape_value_for_shell(value, shell);
+    match shell {
+        "fish" => format!("set -gx {} \"{}\"", key, escaped_value),
+        "bash" | "sh" | "zsh" => format!("export {}=\"{}\"", key, escaped_value),
+        "csh" | "tcsh" => format!("setenv {} \"{}\"", key, escaped_value),
+        _ => format!("export {}=\"{}\"", key, escaped_value), // default to bash-style
     }
 }
 
