@@ -51,6 +51,27 @@ Export secrets to shell:
 sven export
 ```
 
+### Daemon Mode
+
+Sven now supports a daemon mode that keeps decrypted secrets in memory, which significantly improves performance when using secrets across multiple shells or commands.
+
+Start the daemon (unlock secrets and keep them in memory):
+```bash
+sven unlock
+```
+
+Check daemon status:
+```bash
+sven status
+```
+
+Stop the daemon:
+```bash
+sven stop
+```
+
+When the daemon is running, all commands (add, remove, list, export) will automatically use it, avoiding the need to decrypt secrets each time.
+
 ## Uninstallation
 
 Using just:

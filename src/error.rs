@@ -1,3 +1,4 @@
+use std::sync::mpsc::SendError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -22,6 +23,18 @@ pub enum SvenError {
 
     #[error("Config error: {0}")]
     ConfigError(String),
+    
+    #[error("JSON serialization error: {0}")]
+    JsonError(#[from] serde_json::Error),
+    
+    #[error("Channel send error: {0}")]
+    ChannelSendError(String),
+}
+
+impl<T> From<SendError<T>> for SvenError {
+    fn from(err: SendError<T>) -> Self {
+        SvenError::ChannelSendError(err.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, SvenError>;

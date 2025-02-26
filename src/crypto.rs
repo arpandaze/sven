@@ -39,6 +39,11 @@ impl CryptoManager {
             return Err(SvenError::NoGpgKeys);
         }
 
+        // If there's only one key, select it automatically
+        if keys.len() == 1 {
+            return Ok(keys[0].id().unwrap_or_default().to_string());
+        }
+
         let key_strings: Vec<String> = keys
             .iter()
             .map(|key| {

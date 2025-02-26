@@ -1,9 +1,11 @@
 mod crypto;
+mod daemon;
 mod db;
 mod error;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use daemon::{Daemon, DaemonClient};
 use db::Database;
 
 #[derive(Parser)]
@@ -27,6 +29,9 @@ enum Commands {
         #[arg(short, long, default_value = "fish")]
         shell: String,
     },
+    Unlock,
+    Status,
+    Stop,
 }
 
 fn print_line(line: &str) -> std::io::Result<()> {
@@ -95,43 +100,203 @@ fn main() -> Result<()> {
     }));
 
     let cli = Cli::parse();
-    let mut db = Database::new()?;
 
     match cli.command {
-        Commands::Add { key, value } => {
-            db.add_secret(&key, &value)?;
-            if print_line(&format!("Added secret: {}", key)).is_err() {
-                std::process::exit(0);
+        Commands::Unlock => {
+            // Start the daemon
+            if let Err(e) = Daemon::start_daemon() {
+                eprintln!("Failed to start daemon: {}", e);
+                std::process::exit(1);
             }
-        }
-        Commands::Remove { key } => {
-            db.remove_secret(&key)?;
-            if print_line(&format!("Removed secret: {}", key)).is_err() {
-                std::process::exit(0);
-            }
-        }
-        Commands::List => {
-            let secrets = db.list_secrets()?;
-            if secrets.is_empty() {
-                if print_line("No secrets found").is_err() {
-                    std::process::exit(0);
-                }
-            } else {
-                if print_line("Secrets:").is_err() {
-                    std::process::exit(0);
-                }
-                for key in secrets {
-                    if print_line(&format!("  {}", key)).is_err() {
-                        std::process::exit(0);
+
+            // Check if the daemon is running
+            let mut attempts = 0;
+            let max_attempts = 5;
+
+            while attempts < max_attempts {
+                match DaemonClient::is_daemon_running() {
+                    Ok(true) => {
+                        if print_line("Daemon started successfully. Secrets are now unlocked and cached in memory.").is_err() {
+                            std::process::exit(0);
+                        }
+                        return Ok(());
+                    }
+                    _ => {
+                        attempts += 1;
+                        if attempts < max_attempts {
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
                     }
                 }
             }
+
+            if print_line("Daemon started but may need a moment to initialize fully. Run 'sven status' to check.").is_err() {
+                std::process::exit(0);
+            }
         }
-        Commands::Export { shell } => {
-            let secrets = db.get_all_secrets()?;
-            for (key, value) in secrets {
-                if print_line(&format_export(&key, &value, &shell)).is_err() {
-                    std::process::exit(0);
+        Commands::Status => {
+            // Check if daemon is running
+            match DaemonClient::is_daemon_running() {
+                Ok(true) => {
+                    if print_line("Daemon is running. Secrets are unlocked and cached in memory.")
+                        .is_err()
+                    {
+                        std::process::exit(0);
+                    }
+                }
+                Ok(false) => {
+                    if print_line("Daemon is not running. Secrets will be decrypted on demand.")
+                        .is_err()
+                    {
+                        std::process::exit(0);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error checking daemon status: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Stop => {
+            // Stop the daemon
+            match DaemonClient::is_daemon_running() {
+                Ok(true) => {
+                    let client = DaemonClient::new()?;
+                    match client.shutdown_daemon() {
+                        Ok(msg) => {
+                            if print_line(&msg).is_err() {
+                                std::process::exit(0);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to stop daemon: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Ok(false) => {
+                    if print_line("Daemon is not running.").is_err() {
+                        std::process::exit(0);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error checking daemon status: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        // For other commands, try to use the daemon if it's running
+        _ => {
+            let use_daemon = match DaemonClient::is_daemon_running() {
+                Ok(running) => running,
+                Err(_) => false,
+            };
+
+            if use_daemon {
+                let client = DaemonClient::new()?;
+                match cli.command {
+                    Commands::Add { key, value } => match client.add_secret(&key, &value) {
+                        Ok(msg) => {
+                            if print_line(&msg).is_err() {
+                                std::process::exit(0);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to add secret: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
+                    Commands::Remove { key } => match client.remove_secret(&key) {
+                        Ok(msg) => {
+                            if print_line(&msg).is_err() {
+                                std::process::exit(0);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to remove secret: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
+                    Commands::List => match client.list_secrets() {
+                        Ok(secrets) => {
+                            if secrets.is_empty() {
+                                if print_line("No secrets found").is_err() {
+                                    std::process::exit(0);
+                                }
+                            } else {
+                                if print_line("Secrets:").is_err() {
+                                    std::process::exit(0);
+                                }
+                                for key in secrets {
+                                    if print_line(&format!("  {}", key)).is_err() {
+                                        std::process::exit(0);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to list secrets: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
+                    Commands::Export { shell } => match client.get_secrets(&shell) {
+                        Ok(secrets) => {
+                            for (key, value) in secrets {
+                                if print_line(&format_export(&key, &value, &shell)).is_err() {
+                                    std::process::exit(0);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to export secrets: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+            } else {
+                // Daemon is not running, use direct database access
+                let mut db = Database::new()?;
+
+                match cli.command {
+                    Commands::Add { key, value } => {
+                        db.add_secret(&key, &value)?;
+                        if print_line(&format!("Added secret: {}", key)).is_err() {
+                            std::process::exit(0);
+                        }
+                    }
+                    Commands::Remove { key } => {
+                        db.remove_secret(&key)?;
+                        if print_line(&format!("Removed secret: {}", key)).is_err() {
+                            std::process::exit(0);
+                        }
+                    }
+                    Commands::List => {
+                        let secrets = db.list_secrets()?;
+                        if secrets.is_empty() {
+                            if print_line("No secrets found").is_err() {
+                                std::process::exit(0);
+                            }
+                        } else {
+                            if print_line("Secrets:").is_err() {
+                                std::process::exit(0);
+                            }
+                            for key in secrets {
+                                if print_line(&format!("  {}", key)).is_err() {
+                                    std::process::exit(0);
+                                }
+                            }
+                        }
+                    }
+                    Commands::Export { shell } => {
+                        let secrets = db.get_all_secrets()?;
+                        for (key, value) in secrets {
+                            if print_line(&format_export(&key, &value, &shell)).is_err() {
+                                std::process::exit(0);
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
                 }
             }
         }
